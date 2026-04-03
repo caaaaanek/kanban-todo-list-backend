@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from starsessions import SessionAutoloadMiddleware, SessionMiddleware
 from starsessions.stores.redis import RedisStore
 
@@ -18,6 +19,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Kanban Todo List API", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=True,
+)
 
 store = RedisStore(connection=redis_client)
 app.add_middleware(SessionAutoloadMiddleware)
