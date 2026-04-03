@@ -1,12 +1,33 @@
+from contextlib import asynccontextmanager
+
+import redis.asyncio as aioredis
 from fastapi import FastAPI
-from starlette.middleware.sessions import SessionMiddleware
+from starsessions import SessionAutoloadMiddleware, SessionMiddleware
+from starsessions.stores.redis import RedisStore
 
 from app.core.config import settings
 from app.routers import auth, boards, columns, tasks
 
-app = FastAPI(title="Kanban Todo List API")
+redis_client = aioredis.from_url(settings.REDIS_URL)
 
-app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY, max_age=settings.SESSION_EXPIRE_SECONDS)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await redis_client.aclose()
+
+
+app = FastAPI(title="Kanban Todo List API", lifespan=lifespan)
+
+store = RedisStore(connection=redis_client)
+app.add_middleware(SessionAutoloadMiddleware)
+app.add_middleware(
+    SessionMiddleware,
+    store=store,
+    lifetime=settings.SESSION_EXPIRE_SECONDS,
+    cookie_https_only=False,
+    cookie_same_site="lax",
+)
 
 app.include_router(auth.router)
 app.include_router(boards.router)
