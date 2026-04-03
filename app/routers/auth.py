@@ -1,30 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.core.security import hash_password, verify_password
 from app.db.session import get_db
-from app.models.user import User
+from app.repositories.user import UserRepository
 from app.schemas.user import UserCreate, UserOut
+from app.services.auth import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
+    return AuthService(UserRepository(db))
+
+
+def get_session_user_id(request: Request) -> int:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user_id
+
+
 @router.post("/register", response_model=UserOut, status_code=201)
-def register(data: UserCreate, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
-    user = User(email=data.email, hashed_password=hash_password(data.password))
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+def register(data: UserCreate, service: AuthService = Depends(get_auth_service)):
+    return service.register(email=data.email, password=data.password)
 
 
 @router.post("/login")
-def login(data: UserCreate, request: Request, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
-    if not user or not verify_password(data.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+def login(data: UserCreate, request: Request, service: AuthService = Depends(get_auth_service)):
+    user = service.login(email=data.email, password=data.password)
     request.session["user_id"] = user.id
     return {"message": "Logged in"}
 
@@ -36,11 +39,5 @@ def logout(request: Request):
 
 
 @router.get("/me", response_model=UserOut)
-def me(request: Request, db: Session = Depends(get_db)):
-    user_id = request.session.get("user_id")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user
+def me(service: AuthService = Depends(get_auth_service), user_id: int = Depends(get_session_user_id)):
+    return service.get_current_user(user_id)
